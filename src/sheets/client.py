@@ -10,11 +10,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
 from google.oauth2 import service_account
+
+logger = logging.getLogger(__name__)
 
 try:
     from googleapiclient.discovery import build
@@ -53,6 +57,12 @@ HEADERS = [
 
 class SheetsError(RuntimeError):
     pass
+
+
+# Google Sheets 免费配额：写入上限约 60 次/分钟/用户。
+# 自行限流到 ~50/分钟，并对 429 做指数退避重试，避免批量回填瞬间顶爆配额。
+WRITE_MIN_INTERVAL_S = 1.2
+RATE_LIMIT_STATUSES = (429, 500, 502, 503)
 
 
 def _now() -> str:
@@ -106,6 +116,35 @@ class GoogleSheetsProvider(TaskProvider):
         self.sheet_name = config.sheets.sheet_name or "CunFetch Tasks"
         self._service = None
         self._range_prefix = None
+        self._last_write_at = 0.0
+
+    # ---------- 写限流与重试 ----------
+    def _throttle_write(self) -> None:
+        """保证相邻两次写入至少间隔 WRITE_MIN_INTERVAL_S，写入速率 ≤ 50/分钟。"""
+        elapsed = time.monotonic() - self._last_write_at
+        delay = WRITE_MIN_INTERVAL_S - elapsed
+        if delay > 0:
+            time.sleep(delay)
+        self._last_write_at = time.monotonic()
+
+    def _execute(self, request):
+        """带限流与 429/5xx 指数退避重试的执行器，用于所有写请求。"""
+        attempt = 0
+        while True:
+            self._throttle_write()
+            try:
+                return request.execute()
+            except HttpError as exc:
+                status = getattr(exc, "resp", None) or {}
+                code = status.get("status") if isinstance(status, dict) else None
+                if code not in RATE_LIMIT_STATUSES:
+                    raise
+                if attempt >= 5:
+                    raise
+                attempt += 1
+                backoff = 2 ** attempt
+                logger.info("写表限流，%s 秒后重试 (第 %s 次)", backoff, attempt)
+                time.sleep(backoff)
 
     # ---------- 鉴权 ----------
     def _build_credentials(self):
@@ -178,32 +217,36 @@ class GoogleSheetsProvider(TaskProvider):
             return False
 
         row = _task_to_row(task, with_task_id=True)
-        self._client.spreadsheets().values().append(
-            spreadsheetId=self._spreadsheet_id,
-            range=self._range,
-            valueInputOption="USER_ENTERED",
-            body={"values": [row]},
-        ).execute()
+        self._execute(
+            self._client.spreadsheets().values().append(
+                spreadsheetId=self._spreadsheet_id,
+                range=self._range,
+                valueInputOption="USER_ENTERED",
+                body={"values": [row]},
+            )
+        )
         return True
 
     def update(self, task: Task) -> bool:
         rows = self._read_raw_rows()
+        end_col = chr(ord("A") + len(HEADERS) - 1)
         for idx, row in enumerate(rows):
             if idx == 0:
                 continue  # 表头
             if len(row) >= 4 and row[2].strip() == task.url.strip():
                 values = _task_to_row(task, with_task_id=False)
-                # 仅在行不足时补齐
                 while len(values) < len(HEADERS):
                     values.append("")
-                for col, value in enumerate(values):
-                    r = f"{self.sheet_name}!{chr(ord('A') + col)}{idx + 1}"
+                # 整行一次性写入，避免逐列多次写调用顶爆配额
+                rng = f"{self.sheet_name}!A{idx + 1}:{end_col}{idx + 1}"
+                self._execute(
                     self._client.spreadsheets().values().update(
                         spreadsheetId=self._spreadsheet_id,
-                        range=r,
+                        range=rng,
                         valueInputOption="RAW",
-                        body={"values": [[str(value)]]},
-                    ).execute()
+                        body={"values": [values]},
+                    )
+                )
                 return True
         # 没有匹配行则按新建插入（幂等更新兜底）
         self.create(task)

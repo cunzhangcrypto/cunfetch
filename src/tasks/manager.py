@@ -45,7 +45,13 @@ class TaskManager:
         """执行单条任务，返回带结果的新 Task。"""
         task.status = PROCESSING
         task.error = ""
-        self._save(task)
+        # 初始写入因限流等失败时，标记失败返回，绝不拖垮整批
+        try:
+            self._save(task)
+        except Exception as exc:  # noqa: BLE001
+            task.status = FAILED
+            task.error = f"{type(exc).__name__}: {exc}"[:500]
+            return task
         logger.info("开始处理文章: %s (%s)", task.url, task.title or "")
 
         try:

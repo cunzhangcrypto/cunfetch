@@ -15,6 +15,9 @@ config.yaml
 credentials/
 *.json
 
+# 本地运行器脚本（含本机绝对路径，不入库）
+run_daily.cmd
+
 # 日志与产物
 logs/
 *.log
