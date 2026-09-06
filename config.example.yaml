@@ -1,0 +1,73 @@
+# ============================================================
+# CunFetch 配置文件模板
+# 复制为 config.yaml 并按实际情况填写。
+# 注意：config.yaml 和任何含密钥的文件都加入 .gitignore，
+#       绝对不能提交到 GitHub。
+# ============================================================
+
+# ----- 博客信息 -----
+blog:
+  url: "https://www.cunzhangblog.com"
+  rss: "https://www.cunzhangblog.com/rss.xml"          # 优先使用 RSS
+  sitemap: "https://www.cunzhangblog.com/sitemap.xml"  # 有 RSS 时可选
+  use_rss: true      # true = 用 RSS；false = 用 sitemap
+  use_sitemap: false # 是否同时用 sitemap 兜底检测
+
+# ----- 本地素材存储 -----
+storage:
+  root: "D:/CunContent"
+  log_dir: "logs"        # 相对 CunFetch 运行目录，或绝对路径
+
+# ----- 图片采集 -----
+images:
+  target_count: 5                  # 每篇文章目标图片数
+  allowed_formats:
+    - jpg
+    - jpeg
+    - png
+    - webp
+  min_dimension: 100               # 过滤小于该尺寸的图
+  min_file_bytes: 1024             # 过滤小于该大小的文件
+  download_retries: 3              # 单图下载重试次数
+  download_timeout_seconds: 15     # 单图下载超时
+  # 网络补充图片搜索（不足 5 张时）。
+  # 填好某个 provider 的 key 才会启用，否则跳过网络搜索。
+  searcher:
+    provider: "none"   # none | bing | google_cse
+    bing:
+      api_key: ""      # bing 需要
+    google_cse:
+      api_key: ""      # google_cse 需要
+      cx: ""
+
+# ----- 任务队列 -----
+sheets:
+  spreadsheet_id: "1k6iko5SrU36jrKaHZoH_Yam9Z_KAK63u32uf964zKM4"
+  sheet_name: "CunFetch Tasks"
+  # 本机 Service Account 授权 JSON 路径（用于本地 CunFetch 读取/更新）
+  credentials_path: "D:/CunContent/credentials/service-account.json"
+  # GitHub Actions 侧用于写入任务的密钥（环境变量中的 JSON 字符串）
+  credentials_env: "CUNFETCH_SHEETS_CREDENTIALS"
+
+# ----- 网络请求通用 -----
+network:
+  timeout_seconds: 30
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+  # 可选：外网代理（访问 Google、网络图片搜索等被挡可填）。如：
+  #   proxy: "http://127.0.0.1:10808"
+  #   proxy: "socks5h://127.0.0.1:10809"
+  proxy: ""
+
+# ----- 日志 -----
+logging:
+  level: "INFO"   # DEBUG | INFO | WARNING | ERROR
+
+# ----- 计划 -----
+schedule:
+  timezone: "Asia/Shanghai"
+  time: "09:05"
+
+# ----- 其它 -----
+runner:
+  # 发布到 GitHub Actions 的 cron（UTC 时间）
+  detached_cron_utc: "0 1 * * *"

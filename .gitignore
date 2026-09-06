@@ -1,0 +1,31 @@
+# CunFetch 运行时忽略
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+
+# 本地配置与密钥——绝不提交
+config.yaml
+*.sqlite3
+
+# 凭证 / 密钥
+credentials/
+*.json
+
+# 日志与产物
+logs/
+*.log
+.pytest_cache/
+.cache/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 系统文件
+.DS_Store
+Thumbs.db

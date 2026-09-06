@@ -1,0 +1,18 @@
+# CunFetch runtime dependencies
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+feedparser>=6.0.0
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=1.1.0
+google-auth>=2.23.0
+Pillow>=10.0.0
+tenacity>=8.2.0
+PyYAML>=6.0
+
+# Optional: used only by the GitHub Actions side (blog detection)
+# which shares the same codebase.
+
+# Dev / packaging
+pyinstaller>=6.0.0

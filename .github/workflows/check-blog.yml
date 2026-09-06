@@ -1,0 +1,40 @@
+name: CunFetch Check Blog
+
+# 需求第四十一节：GitHub Actions 按 UTC 执行。
+# 目标执行时间为北京时间每天 09:00 = UTC 01:00（cron: 0 1 * * *）。
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}   # 允许手动触发调试
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 检测新文章并写入任务队列
+        env:
+          # Service Account 授权的 JSON 内容（GitHub Secret CUNFETCH_SHEETS_CREDENTIALS）
+          CUNFETCH_SHEETS_CREDENTIALS: ${{ secrets.CUNFETCH_SHEETS_CREDENTIALS }}
+        run: python -m src.main --detect
+
+      - name: 失败时报错
+        if: failure()
+        run: echo "::error::CunFetch 检测任务失败，请检查 Google Sheets 凭证与网络。"
