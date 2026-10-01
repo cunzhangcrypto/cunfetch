@@ -359,7 +359,8 @@ function renderDashboard(root, baseUrl) {
   header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
   h1 { font-size:22px; margin:0; display:flex; align-items:center; gap:10px; }
   .hk { display:flex; }
-  .base { color:var(--muted); font-size:13px; }
+  .base { color:var(--accent); font-size:13px; text-decoration:none; font-weight:600; }
+  .base:hover { text-decoration:underline; }
   .item { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px; display:flex; gap:16px; margin-bottom:14px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
   .cover { flex:0 0 92px; width:92px; height:124px; overflow:hidden; border-radius:10px; border:1px solid var(--border); background:#eee; }
   .cover img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -406,7 +407,7 @@ function renderDashboard(root, baseUrl) {
         </linearGradient></defs>
       </svg>
     </span>CunFetch</h1>
-    <span class="base">${baseUrl}</span>
+    <a class="base" href="https://github.com/cunzhangcrypto/cunfetch" target="_blank" rel="noopener">GitHub</a>
   </header>
   <div id="list">${body}</div>
   <div class="foot">© 2026 CunFetch</div>
