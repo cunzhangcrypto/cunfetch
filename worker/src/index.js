@@ -221,7 +221,7 @@ async function collectBucket(env) {
     cursor = listRes.truncated ? listRes.cursor : undefined;
   } while (cursor);
 
-  // 读每个 slug 的 status.json
+  // 读每个 slug 的 status.json 与 platforms.json（取 title 供看板显示）
   for (const date of Object.keys(root)) {
     for (const slot of Object.keys(root[date])) {
       for (const slug of Object.keys(root[date][slot])) {
@@ -234,10 +234,25 @@ async function collectBucket(env) {
             entry.status = { downloaded: false };
           }
         }
+        // 从 platforms.json 读 title，作为看板展示名；取不到则保留 slug
+        try {
+          const pj = await env.INBOX.get(`${PREFIX}/${date}/${slot}/${slug}/platforms.json`);
+          if (pj) {
+            const parsed = JSON.parse(await pj.text());
+            entry.title = (parsed && parsed.title) || "";
+          }
+        } catch (e) {
+          entry.title = "";
+        }
       }
     }
   }
   return root;
+}
+
+function escHtml(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function renderDashboard(root, baseUrl) {
@@ -253,7 +268,8 @@ function renderDashboard(root, baseUrl) {
         const hasVideo = files.some(([f]) => f === "video.mp4");
         const hasPlatforms = files.some(([f]) => f === "platforms.json");
         const st = entry.status || {};
-        rows.push({ date, slot, slug, hasVideo, hasPlatforms, downloaded: Boolean(st.downloaded), pull_at: st.pull_at || null, local_size: st.local_size || null });
+        const title = (entry.title || "").trim() || slug;
+        rows.push({ date, slot, slug, title, hasVideo, hasPlatforms, downloaded: Boolean(st.downloaded), pull_at: st.pull_at || null, local_size: st.local_size || null });
       }
     }
   }
@@ -264,7 +280,7 @@ function renderDashboard(root, baseUrl) {
       <tr>
         <td>${r.date}</td>
         <td>${slotLabel[r.slot] || r.slot}</td>
-        <td>${r.slug}</td>
+        <td>${escHtml(r.title)}</td>
         <td>${r.hasVideo ? "✓" : "-"}</td>
         <td>${r.hasPlatforms ? "✓" : "-"}</td>
         <td>${r.downloaded ? '<span class="ok">已下载 ✓</span>' : '<span class="no">未下载</span>'}</td>
@@ -321,7 +337,7 @@ function renderDashboard(root, baseUrl) {
   </header>
   <div class="card">
     <table>
-      <thead><tr><th>日期</th><th>档位</th><th>内容 slug</th><th>视频</th><th>标题/标签</th><th>下载状态</th><th>下载时间</th><th>大小</th></tr></thead>
+      <thead><tr><th>日期</th><th>档位</th><th>内容标题</th><th>视频</th><th>标题/标签</th><th>下载状态</th><th>下载时间</th><th>大小</th></tr></thead>
       <tbody>${body}</tbody>
     </table>
   </div>
