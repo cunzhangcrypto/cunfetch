@@ -2,10 +2,13 @@ name: CunFetch Check Blog
 
 # 需求第四十一节：GitHub Actions 按 UTC 执行。
 # 目标执行时间为北京时间每天 09:00 = UTC 01:00（cron: 0 1 * * *）。
+# 【已暂停】定时检测博客（博客端暂歇，有需要再取消注释恢复）。
+# 原：每天 09:00 北京 = UTC 01:00 检测新文章写入 Google Sheets。
+# 恢复方法：取消下面 schedule 的注释即可。
 on:
-  schedule:
-    - cron: "0 1 * * *"
-  workflow_dispatch: {}   # 允许手动触发调试
+  # schedule:
+  #   - cron: "0 1 * * *"
+  workflow_dispatch: {}   # 仅手动触发（调试用）
 
 permissions:
   contents: read
