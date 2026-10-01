@@ -14,9 +14,27 @@ config.yaml
 # 凭证 / 密钥
 credentials/
 *.json
+# 但 worker 需要提交 package.json / package-lock.json（否则 CI 无法 npm install）
+!worker/package.json
+!worker/package-lock.json
+!worker/wrangler.toml
 
 # 本地运行器脚本（含本机绝对路径，不入库）
 run_daily.cmd
+pull_inbox.cmd
+run_video.cmd
+
+# 临时预览用（假数据 + 预览脚本，不入库）
+.preview/
+preview_inbox.py
+
+# Trae 本地文档
+.trae/
+
+# 私有视频模块（非开源，绝不提交）+ 视频产物
+src/video/
+*.mp4
+.last_music.txt
 
 # 日志与产物
 logs/
@@ -28,6 +46,9 @@ logs/
 .venv/
 venv/
 env/
+
+# node（worker 构建依赖的本机安装，不入库）
+node_modules/
 
 # 系统文件
 .DS_Store

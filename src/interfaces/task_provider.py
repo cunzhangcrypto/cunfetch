@@ -17,6 +17,12 @@ PROCESSING = "processing"
 COMPLETED = "completed"
 FAILED = "failed"
 
+# 视频生成状态（独立于采集 status，专列 video_status）
+VIDEO_PENDING = "pending"
+VIDEO_PROCESSING = "processing"
+VIDEO_COMPLETED = "completed"
+VIDEO_FAILED = "failed"
+
 
 @dataclass
 class Task:
@@ -34,6 +40,7 @@ class Task:
     created_at: str = ""
     updated_at: str = ""
     error: str = ""
+    video_status: str = VIDEO_PENDING
 
     @classmethod
     def new(cls, url: str, title: str = "", published_at: str = "") -> "Task":

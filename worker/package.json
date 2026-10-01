@@ -1,0 +1,13 @@
+{
+  "name": "cunfetch-inbox-worker",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  }
+}

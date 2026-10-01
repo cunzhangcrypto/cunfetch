@@ -32,6 +32,7 @@ from ..interfaces.task_provider import (
     PROCESSING,
     COMPLETED,
     FAILED,
+    VIDEO_PENDING,
     Task,
     TaskProvider,
 )
@@ -52,6 +53,7 @@ HEADERS = [
     "created_at",
     "updated_at",
     "error",
+    "video_status",
 ]
 
 
@@ -98,6 +100,7 @@ def _parse_values(rows: list[list]) -> list[Task]:
                     created_at=record.get("created_at", ""),
                     updated_at=record.get("updated_at", ""),
                     error=record.get("error", ""),
+                    video_status=record.get("video_status", "") or VIDEO_PENDING,
                 )
             )
         except (TypeError, ValueError):
@@ -117,6 +120,7 @@ class GoogleSheetsProvider(TaskProvider):
         self._service = None
         self._range_prefix = None
         self._last_write_at = 0.0
+        self._sheet_gid = None
 
     # ---------- 写限流与重试 ----------
     def _throttle_write(self) -> None:
@@ -265,6 +269,77 @@ class GoogleSheetsProvider(TaskProvider):
             task.total_images = task_total
         return self.update(task)
 
+    def mark_video_status(self, url: str, status: str) -> bool:
+        """仅更新某任务(按 url)的 video_status 与 updated_at，不动其它列。
+
+        用于视频生成成功后回写表格，让「完成/未完成」一眼可辨。
+        status == completed 时，再把该行的 Title 文字标红作额外标记。
+        """
+        task = self.get_task(url)
+        if task is None:
+            return False
+        task.video_status = status
+        task.updated_at = _now()
+        ok = self.update(task)
+        if ok and status == COMPLETED:
+            try:
+                row = self._row_index_of(url)
+                if row is not None:
+                    self._highlight_title(row)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Title 标红失败(不影响状态回填): %s", exc)
+        return ok
+
+    def _row_index_of(self, url: str) -> int | None:
+        """按 url 定位数据行在二维数组中的下标（0=表头，>=1 为数据行）。"""
+        rows = self._read_raw_rows()
+        for idx, row in enumerate(rows):
+            if idx == 0:
+                continue
+            if len(row) >= 4 and (row[2] or "").strip() == (url or "").strip():
+                return idx
+        return None
+
+    @property
+    def _sheet_id(self) -> int:
+        """按 sheet_name 取该工作表的 sheetId（格式请求需要用它定位行）。"""
+        if self._sheet_gid is None:
+            meta = self._client.spreadsheets().get(
+                spreadsheetId=self._spreadsheet_id,
+                fields="sheets(properties(sheetId,title))",
+            ).execute()
+            for sh in meta.get("sheets", []):
+                if sh.get("properties", {}).get("title") == self.sheet_name:
+                    self._sheet_gid = sh["properties"]["sheetId"]
+                    break
+            if self._sheet_gid is None:
+                raise SheetsError(f"找不到工作表: {self.sheet_name}")
+        return self._sheet_gid
+
+    def _highlight_title(self, row_index: int) -> None:
+        """把指定表行 Title(B列) 单元格文字设为红色，作为已完成视频的标记。"""
+        req = {
+            "requests": [{
+                "repeatCell": {
+                    "range": {
+                        "sheetId": self._sheet_id,
+                        "startRowIndex": row_index,
+                        "endRowIndex": row_index + 1,
+                        "startColumnIndex": 1,   # B 列 = title
+                        "endColumnIndex": 2,
+                    },
+                    "cell": {"userEnteredFormat": {"textFormat": {
+                        "foregroundColorStyle": {
+                            "rgbColor": {"red": 1.0, "green": 0.0, "blue": 0.0}
+                        }
+                    }}},
+                    "fields": "userEnteredFormat.textFormat.foregroundColorStyle.rgbColor",
+                }
+            }]
+        }
+        self._execute(self._client.spreadsheets().batchUpdate(
+            spreadsheetId=self._spreadsheet_id, body=req))
+
     def _read_raw_rows(self) -> list[list]:
         result = (
             self._client.spreadsheets()
@@ -296,5 +371,6 @@ def _task_to_row(task: Task, with_task_id: bool) -> list:
         str(task.created_at),
         str(task.updated_at),
         str(task.error),
+        str(task.video_status),
     ]
     return row

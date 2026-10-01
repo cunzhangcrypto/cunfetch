@@ -11,6 +11,12 @@ Pillow>=10.0.0
 tenacity>=8.2.0
 PyYAML>=6.0
 
+# 私有视频模块（渲染 10s 短视频，非开源 src/video 使用）
+playwright>=1.40.0
+
+# R2 云端收件箱拉取（S3 兼容，公有代码可用）
+boto3>=1.34.0
+
 # Optional: used only by the GitHub Actions side (blog detection)
 # which shares the same codebase.
 

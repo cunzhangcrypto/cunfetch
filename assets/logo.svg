@@ -1,0 +1,30 @@
+<svg width="320" height="96" viewBox="0 0 320 96" fill="none" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif">
+  <!-- 图标：抓取箭头 → 收件箱 -->
+  <defs>
+    <linearGradient id="box" x1="0" y1="64" x2="320" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 收件箱体 -->
+  <g>
+    <!-- 箱体底 + 前壁 -->
+    <path d="M18 40 L18 66 Q18 70 22 70 L66 70 Q70 70 70 66 L70 40 Z"
+          fill="#f3eefc"/>
+    <path d="M18 40 L70 40 L70 66 Q70 70 66 70 L22 70 Q18 70 18 66 Z"
+          fill="#f8f5ff" stroke="#6d28d9" stroke-width="3" stroke-linejoin="round"/>
+    <!-- 箱顶开口 -->
+    <path d="M12 32 L44 30 L70 32"
+          stroke="#6d28d9" stroke-width="3" stroke-linecap="round"/>
+    <!-- 抓取箭头 -->
+    <path d="M44 12 L44 34"
+          stroke="#6d28d9" stroke-width="5" stroke-linecap="round"/>
+    <path d="M32 24 L44 36 L56 24"
+          stroke="#6d28d9" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- 文字 -->
+  <text x="92" y="48" fill="#1f2328" font-size="30" font-weight="700" letter-spacing="0.5">CunFetch</text>
+  <text x="94" y="70" fill="#6b7280" font-size="13" font-weight="400" letter-spacing="0.3">Fetch · Download · Deliver</text>
+</svg>

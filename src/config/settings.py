@@ -66,6 +66,29 @@ def _defaults() -> dict[str, Any]:
         "logging": {"level": "INFO"},
         "schedule": {"timezone": "Asia/Shanghai", "time": "09:05"},
         "runner": {"detached_cron_utc": "0 1 * * *"},
+        "video": {
+            "enabled": True,
+            "provider": "agnes",
+            "model": "agnes-2.5-flash",
+            "base_url": "https://apihub.agnes-ai.com/v1",
+            "api_key": "",
+            "music_dir": "D:/Github/CunCut/video/music",
+            "sound_dir": "D:/Github/CunCut/templates/sound",
+            "out_subdir": "video",
+            "platforms": ["douyin", "bilibili", "shipinhao"],
+        },
+        "r2": {
+            "account_id": "",
+            "bucket": "cunfetch-inbox",
+            "endpoint": "",
+            "region": "auto",
+            "access_key_id": "",
+            "secret_access_key": "",
+            "prefix": "inbox",
+            "local_root": "",
+            "worker_base_url": "",
+            "worker_token": "",
+        },
     }
 
 
