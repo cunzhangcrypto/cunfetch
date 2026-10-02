@@ -195,32 +195,6 @@ def cmd_video_pending(settings: Settings) -> int:
     return 0 if failed == 0 else 1
 
 
-def cmd_pull_r2(settings: Settings, slot: str) -> int:
-    """从 R2 云端收件箱拉取内容落盘（slot: auto|early|mid|late|all）。"""
-    logger.info("===== CunFetch pull-r2 启动 =====")
-    try:
-        from .r2.inbox import pull_inbox
-    except Exception as exc:  # noqa: BLE001
-        logger.error("R2 模块不可用（可能 boto3 未装或代码缺失）: %s", exc)
-        print(f"[错误] R2 模块不可用: {exc}")
-        return 2
-    try:
-        from .netutil import ensure_proxy_env
-
-        ensure_proxy_env(settings)  # 注入代理供 boto3 走 R2
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("代理注入失败(继续)：%s", exc)
-    try:
-        result = pull_inbox(settings, slot)
-        print(f"[拉取完成] 新下载 {result['downloaded']} 个，跳过 {result['skipped']} 个，"
-              f"缺 platforms {result['missing_platforms']} 个（档位 {result['slots']}）")
-        return 0
-    except Exception as exc:  # noqa: BLE001
-        logger.error("R2 拉取失败: %s", exc)
-        print(f"[错误] {exc}")
-        return 1
-
-
 def cmd_video(settings: Settings, target: str) -> int:
     """渲染指定文章本地目录的 10s 短视频 + 三平台标题/标签 JSON。"""
     logger.info("===== CunFetch video 启动 =====")
@@ -282,8 +256,6 @@ def main(argv: list[str] | None = None) -> int:
                        help="为指定文章本地目录/URL/标题关键词 渲染 10s 短视频+三平台标题标签")
     group.add_argument("--video-pending", action="store_true",
                        help="渲染所有已采集但本地尚无视频(缺 video/*.mp4)的文章，逐个生成并回填状态")
-    group.add_argument("--pull-r2", nargs="?", const="auto", metavar="SLOT",
-                       help="从 R2 云端收件箱拉取内容落盘（auto|early|mid|late|all，默认 auto）")
     parser.add_argument("--config", default=None, help="配置文件路径（默认 config.yaml）")
     args = parser.parse_args(argv)
 
@@ -298,8 +270,6 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_video(settings, args.video)
     if args.video_pending:
         return cmd_video_pending(settings)
-    if args.pull_r2 is not None:
-        return cmd_pull_r2(settings, args.pull_r2 or "auto")
     if args.detect:
         return cmd_detect(settings)
     return cmd_run(settings)

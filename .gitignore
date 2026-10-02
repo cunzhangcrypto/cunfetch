@@ -24,9 +24,17 @@ run_daily.cmd
 pull_inbox.cmd
 run_video.cmd
 
+# 本地工具目录（拉取等本地专用逻辑，不入 GitHub 仓库）
+tools/
+
+# 本地 R2 拉取模块（已从仓库移除，仅本机保留）
+src/r2/
+src/storage/r2local.py
+
 # 临时预览用（假数据 + 预览脚本，不入库）
 .preview/
 preview_inbox.py
+preview_inbox.mjs
 
 # Trae 本地文档
 .trae/
