@@ -15,7 +15,7 @@ worker/
 | 端点 | 方法 | 鉴权 | 说明 |
 |---|---|---|---|
 | `/api/health` | GET | 无 | 连通性探测 |
-| `/api/upload` | POST | Bearer | multipart 上传：`file` + `slug` + `slot(early\|mid\|late)` + `date?(YYYYMMDD)` |
+| `/api/upload` | POST | Bearer | multipart 上传：`file` + `slug`(视频必填) + `slot(early\|mid\|late)` + `date?(YYYYMMDD)` + `type?(video\|article)` |
 | `/api/feedback` | POST | Bearer | JSON：`slug/slot/date/downloaded/pull_at/local_size`，上报本地下载状态 |
 | `/api/objects` | GET | Bearer | 返回各 slug 对象与状态（JSON） |
 | `/` | GET | 无 | 看板页面（公开可访问，未授权也能看） |
@@ -92,11 +92,40 @@ Content-Type: multipart/form-data
   slug    篇名唯一标识           # 如 muse-signup；用于文件夹/体现，仅可含字母数字-_
   slot    early|mid|late        # 发布档：早 09:05 / 中 12:10 / 晚 19:08
   date    (可选) YYYYMMDD        # 发布日期；缺省用服务器当天(Asia/Shanghai)
+  type    (可选) video|article    # 缺省 video（视频线）；article=自媒体图文，见下节
 ```
 
 **也支持传 zip 压缩包**：把上面三（或更多）个文件打进一个 zip，`file` 直接传该 zip 即可。Worker 会自动解压并按内部文件名分流传入 R2（支持任意目录层级，取 basename）。
 
 > 多文件扩展：worker 按类型自动分流（json→platforms.json、图片→cover.扩展名、其余→video.mp4）。以后要加第四种类型，在 worker 再添一个分支即可。zip 内条目同样适用该规则。
+
+### 图文上传（自媒体 5 平台，`type=article`）
+
+除视频外，还支持上传**一篇自媒体图文**（微信公众号 / 小红书 / 头条 / 百家号 / 知乎）。做法同样是传一个 **zip**，但表单加 `type=article`：
+
+```
+POST {worker_url}/api/upload
+Authorization: Bearer {WORKER_API_TOKEN}
+Content-Type: multipart/form-data
+
+字段：
+  file    <文章名>.zip            # 必带；zip 内为各平台子目录（见下结构）
+  type    article                 # 固定填 article，走图文线
+  slot    late                    # 图文固定随晚间档（local 在晚档拉取）
+  date    (可选) YYYYMMDD          # 缺省服务器当天(Asia/Shanghai)
+```
+
+- **标题取自 zip 文件名**（去掉 `.zip`）。如上传 `示例_一篇文章为什么要改五遍.zip` → 本地目录 `D:\CunContent\自媒体\<日期>_示例_一篇文章为什么要改五遍\`。
+- zip 内**直接放各平台子目录**（或连同外层文件夹一起打包，worker 会自动剥离外层）：
+  ```
+  wechat/       article.json + cover.png (+ inline-1.png)
+  xiaohongshu/  article.json + cover.png
+  toutiao/      article.json + cover.png
+  baijiahao/    article.json + cover.png
+  zhihu/        article.json + cover.png
+  ```
+- worker 上传时**解压并按 `<平台>/<文件>` 存入收件箱**，看板上可直接看到 5 个平台的标题/标签与封面。
+- 本地在**晚间档（late）定时任务**里拉取并镜像到 `D:\CunContent\自媒体\<日期>_<标题>\`，供 CunWrite 扫描直发。图文与视频两条线互不影响。
 
 ### platforms.json 结构（与看板/下载一致）
 

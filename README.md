@@ -2,7 +2,7 @@
 
 面向内容创作者的多发布流程工具。本仓库公开的是它的一个核心组件：**云端收件箱 + 看板**（基于 Cloudflare Workers + R2）。
 
-AI 助手（如 muse）把做好的**短视频 + 封面 + 三平台标题/标签**上传到云端收件箱；你在网页看板上一眼看到当天各发布时段的素材、封面和标签，确认无误后一键复制、下载、发布。
+AI 助手（如 muse）把做好的**短视频 + 封面 + 自媒体平台文章内容**上传到云端收件箱；你在网页看板上一眼看到当天各发布时段的素材、封面和标签，确认无误后一键复制、下载、发布。
 
 ## 仓库内容
 
@@ -41,9 +41,35 @@ Cloudflare Worker 收件箱 (R2)
 | 中 | `mid` | 12:10 |
 | 晚 | `late` | 19:08 |
 
+## 自媒体图文（5 平台）
+
+除了短视频，收件箱还支持**一篇自媒体图文**：muse 把写好的内容打包成一个 **zip** 上传（表单加 `type=article`），本地在**晚间档（late）**随视频一起拉取，解压到 `D:\CunContent\自媒体\<日期>_<标题>\`，交给 CunWrite 扫描 → 勾平台 → 直接进各平台草稿箱。
+
+zip 内按平台分子目录（文件夹中英文名都认），标题取自 zip 文件名：
+
+```text
+<标题>.zip
+├── wechat/        article.json + cover.png (+ 正文插图 inline-1.png)
+├── xiaohongshu/   article.json + cover.png
+├── toutiao/       article.json + cover.png
+├── baijiahao/     article.json + cover.png
+└── zhihu/         article.json + cover.png
+```
+
+- 某个平台**不需要发** → 该子目录直接不建，其余照常。
+- 本地落盘：`D:\CunContent\自媒体\<YYYY-MM-DD>_<标题>\`，结构与上面一致。
+
 ## 部署
 
 参见 [`worker/README.md`](worker/README.md)：手动在 GitHub Actions `Deploy Inbox Worker` 触发，Cloudflare 无需本机操作。
+
+## 打赏支持
+
+如果 CunFetch 帮到了你，欢迎请村长喝杯咖啡～你的支持是持续更新的动力。
+
+| 微信 | 支付宝 |
+| --- | --- |
+| ![微信打赏](assets/donate/wechat.png) | ![支付宝打赏](assets/donate/alipay.png) |
 
 ## 协议
 

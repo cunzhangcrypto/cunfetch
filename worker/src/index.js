@@ -14,12 +14,22 @@
  * 对象键规则：
  *   inbox/<yyyymmdd>/<slot>/<slug>/video.mp4
  *   inbox/<yyyymmdd>/<slot>/<slug>/platforms.json
- *   inbox/<yyyymmdd>/<slot>/<slug>/status.json   ← 本地上报后由本 Worker 写入
+ *   inbox/<yyyymmdd>/<slot>/<slug>/status.json           ← 本地上报后由本 Worker 写入
+ *   articles/<yyyymmdd>/<slot>/<slug>/<平台>/article.json | cover.<ext> ...  ← 自媒体图文
  * slot ∈ early | mid | late
  */
 
 const SLOTS = new Set(["early", "mid", "late"]);
 const PREFIX = "inbox";
+const ARTICLE_PREFIX = "articles"; // 自媒体图文（worker 端解压后按 平台/文件 存）
+// 图文各平台子目录名（中英文都认），用于剥离 zip 外层包裹目录
+const PLATFORM_DIRS = new Set([
+  "wechat", "微信公众号", "微信",
+  "xiaohongshu", "小红书",
+  "toutiao", "今日头条", "头条",
+  "baijiahao", "百家号",
+  "zhihu", "知乎",
+]);
 
 // 文件名/内容类型 → 目标对象文件名，便于扩展
 const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
@@ -90,20 +100,65 @@ function json(data, status = 200) {
   });
 }
 
+// 按扩展名推断 content-type（存 R2 / 下载时用）
+function contentTypeFor(name) {
+  const n = (name || "").toLowerCase();
+  if (n.endsWith(".json")) return "application/json";
+  if (n.endsWith(".png")) return "image/png";
+  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+  if (n.endsWith(".webp")) return "image/webp";
+  if (n.endsWith(".gif")) return "image/gif";
+  if (n.endsWith(".mp4")) return "video/mp4";
+  if (n.endsWith(".zip")) return "application/zip";
+  return "application/octet-stream";
+}
+
+// 若压缩包所有条目同处一个顶层目录、且该目录不是平台名，则返回该目录（应剥离）
+function stripCommonWrapper(names) {
+  const tops = new Set();
+  for (const raw of names) {
+    const s = String(raw || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if (!s) continue;
+    tops.add(s.split("/")[0]);
+  }
+  if (tops.size === 1) {
+    const top = [...tops][0];
+    if (!PLATFORM_DIRS.has(top) && !PLATFORM_DIRS.has(top.toLowerCase())) return top;
+  }
+  return null;
+}
+
 async function readUploadMultipart(request) {
-  // 用 FormData 解析 multipart：可一次带多个 file（platforms.json + video.mp4）
-  // 其他字段：slug / slot / date
+  // 用 FormData 解析 multipart。通用字段：slot / date / type(默认 video)。
+  //   video   ：可一次带多个 file（platforms.json + 封面 + video.mp4），另需 slug
+  //   article ：带一个图文 zip（内含各平台子目录），标题取自 zip 文件名，slug 可省（由标题派生）
   const form = await request.formData();
   const files = form.getAll("file");
   if (!files || files.length === 0) throw new Error("缺少 file 字段（至少一个）");
-  const slugRaw = form.get("slug");
   const slotRaw = form.get("slot");
-  const dateRaw = form.get("date");
+  if (!SLOTS.has(slotRaw)) throw new Error("slot 必须为 early|mid|late");
+  const date = parseDate(form.get("date"));
+  const type = String(form.get("type") || "video").toLowerCase();
+
+  if (type === "article") {
+    const zipFile = files.find((f) => f instanceof File && /\.zip$/i.test(f.name || ""))
+      || files.find((f) => f instanceof File);
+    if (!zipFile) throw new Error("图文上传需提供 zip 文件");
+    const title = (zipFile.name || "").replace(/\.[^.]+$/, "").trim();
+    if (!title) throw new Error("无法从 zip 文件名取得标题");
+    const slug = sanitizeSlug(form.get("slug") || title);
+    if (!slug) throw new Error("slug 清洗后为空");
+    const zipBytes = new Uint8Array(await zipFile.arrayBuffer());
+    return {
+      type: "article", slug, slot: slotRaw, date, title,
+      zipName: zipFile.name || "bundle.zip", zipBytes,
+    };
+  }
+
+  const slugRaw = form.get("slug");
   if (!slugRaw) throw new Error("缺少 slug 字段");
   const slug = sanitizeSlug(slugRaw);
   if (!slug) throw new Error("slug 清洗后为空");
-  if (!SLOTS.has(slotRaw)) throw new Error("slot 必须为 early|mid|late");
-  const date = parseDate(dateRaw);
 
   // 分流三类（若某 file 是 zip 压缩包则先解压再分流）：
   //   json → platforms.json；图片 → cover.<ext>；其余 → video.mp4
@@ -111,10 +166,10 @@ async function readUploadMultipart(request) {
   for (const f of files) {
     if (!(f instanceof File)) continue;
     const name = f.name || "";
-    const type = f.type || "";
+    const ftype = f.type || "";
     const bytes = new Uint8Array(await f.arrayBuffer());
 
-    if (/\.zip$/i.test(name) || /zip/i.test(type)) {
+    if (/\.zip$/i.test(name) || /zip/i.test(ftype)) {
       // zip 压缩包：解压后按内部文件名逐条分流（支持任意层级目录，取 basename）
       const zip = await JSZip.loadAsync(bytes);
       const entries = Object.values(zip.files);
@@ -126,11 +181,11 @@ async function readUploadMultipart(request) {
         classifyFile(inner, "", innerBytes, parts);
       }
     } else {
-      classifyFile(name, type, bytes, parts);
+      classifyFile(name, ftype, bytes, parts);
     }
   }
   if (parts.length === 0) throw new Error("没有可上传的文件");
-  return { slug, slot: slotRaw, date, parts };
+  return { type: "video", slug, slot: slotRaw, date, parts };
 }
 
 async function handleUpload(request, env) {
@@ -140,6 +195,42 @@ async function handleUpload(request, env) {
   } catch (e) {
     return json({ ok: false, error: e.message }, 400);
   }
+
+  if (parsed.type === "article") {
+    // 图文：解压 zip → 按 <平台>/<文件> 存入 R2（看板可读各平台标题/标签/封面），并写 meta.json
+    const { slug, slot, date, title, zipName, zipBytes } = parsed;
+    const base = `${ARTICLE_PREFIX}/${date}/${slot}/${slug}`;
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(zipBytes);
+    } catch (e) {
+      return json({ ok: false, error: "zip 解析失败: " + e.message }, 400);
+    }
+    const entries = Object.values(zip.files).filter((e) => !e.dir);
+    const wrapper = stripCommonWrapper(entries.map((e) => e.name));
+    const written = [];
+    for (const entry of entries) {
+      let rel = entry.name.replace(/\\/g, "/");
+      if (wrapper) {
+        if (rel === wrapper || rel === wrapper + "/") continue;
+        if (rel.startsWith(wrapper + "/")) rel = rel.slice(wrapper.length + 1);
+      }
+      rel = rel.replace(/^\/+|\/+$/g, "");
+      if (!rel || rel.includes("..")) continue;
+      const bytes = new Uint8Array(await entry.async("arraybuffer"));
+      const key = `${base}/${rel}`;
+      const put = await env.INBOX.put(key, bytes, { httpMetadata: { contentType: contentTypeFor(rel) } });
+      written.push({ key, etag: put.httpEtag || put.etag });
+    }
+    if (written.length === 0) return json({ ok: false, error: "zip 内没有可用文件" }, 400);
+    const meta = { title, original: zipName, slug, slot, date, uploaded_at: new Date().toISOString() };
+    const mp = await env.INBOX.put(`${base}/meta.json`, JSON.stringify(meta), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    written.push({ key: `${base}/meta.json`, etag: mp.httpEtag || mp.etag });
+    return json({ ok: true, type: "article", title, slug, slot, date, files: written });
+  }
+
   const { slug, slot, date, parts } = parsed;
   const written = [];
   for (const p of parts) {
@@ -149,7 +240,7 @@ async function handleUpload(request, env) {
     });
     written.push({ key, etag: put.httpEtag || put.etag });
   }
-  return json({ ok: true, slug, slot, date, files: written });
+  return json({ ok: true, type: "video", slug, slot, date, files: written });
 }
 
 async function handleFeedback(request, env) {
@@ -165,7 +256,9 @@ async function handleFeedback(request, env) {
   if (!slug || !SLOTS.has(slot)) {
     return json({ ok: false, error: "缺少有效 slug/slot" }, 400);
   }
-  const statusKey = `${PREFIX}/${date}/${slot}/${slug}/status.json`;
+  const kind = body.kind === "article" ? "article" : "video";
+  const prefix = kind === "article" ? ARTICLE_PREFIX : PREFIX;
+  const statusKey = `${prefix}/${date}/${slot}/${slug}/status.json`;
   const existing = await env.INBOX.get(statusKey);
   let record = {};
   if (existing) {
@@ -189,51 +282,109 @@ async function handleFeedback(request, env) {
   return json({ ok: true, key: statusKey, status: updated });
 }
 
-async function collectBucket(env) {
-  // 遍历 inbox/ 前缀，按 date/slot/slug 汇总
-  const root = {};
+async function listAll(env, prefix) {
+  const out = [];
   let cursor;
   do {
-    const listRes = cursor ? await env.INBOX.list({ prefix: PREFIX + "/", cursor }) : await env.INBOX.list({ prefix: PREFIX + "/" });
-    for (const obj of listRes.objects) {
-      const parts = obj.key.split("/");
-      // inbox/<date>/<slot>/<slug>/<file>
-      if (parts.length < 5) continue;
-      const [, date, slot, slug, file] = parts;
-      if (!root[date]) root[date] = {};
-      if (!root[date][slot]) root[date][slot] = {};
-      if (!root[date][slot][slug]) root[date][slot][slug] = { files: {}, status: null };
-      const entry = root[date][slot][slug];
-      entry.files[file] = { size: obj.size, etag: obj.etag, uploaded_at: obj.uploaded };
-    }
-    cursor = listRes.truncated ? listRes.cursor : undefined;
+    const res = cursor
+      ? await env.INBOX.list({ prefix, cursor })
+      : await env.INBOX.list({ prefix });
+    out.push(...res.objects);
+    cursor = res.truncated ? res.cursor : undefined;
   } while (cursor);
+  return out;
+}
 
-  // 读每个 slug 的 status.json 与 platforms.json（取 title + 三平台标题/标签供看板显示）
+function normalizeTags(t) {
+  if (Array.isArray(t)) return t.map((s) => String(s).trim()).filter(Boolean);
+  if (typeof t === "string") return t.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+
+async function collectBucket(env) {
+  // 汇总两条线：inbox/（视频）与 articles/（自媒体图文），统一到 root[date][slot][slug]
+  const root = {};
+  const ensure = (date, slot, slug, kind) => {
+    if (!root[date]) root[date] = {};
+    if (!root[date][slot]) root[date][slot] = {};
+    if (!root[date][slot][slug]) root[date][slot][slug] = { kind, files: {}, status: null };
+    return root[date][slot][slug];
+  };
+
+  // 视频线：inbox/<date>/<slot>/<slug>/<file>
+  for (const obj of await listAll(env, PREFIX + "/")) {
+    const parts = obj.key.split("/");
+    if (parts.length < 5) continue;
+    const [, date, slot, slug, file] = parts;
+    ensure(date, slot, slug, "video").files[file] =
+      { size: obj.size, etag: obj.etag, uploaded_at: obj.uploaded };
+  }
+
+  // 图文线：articles/<date>/<slot>/<slug>/<平台>/<file>
+  for (const obj of await listAll(env, ARTICLE_PREFIX + "/")) {
+    const parts = obj.key.split("/");
+    if (parts.length < 6) continue;
+    const [, date, slot, slug] = parts;
+    const rel = parts.slice(4).join("/");
+    ensure(date, slot, slug, "article").files[rel] =
+      { size: obj.size, etag: obj.etag, uploaded_at: obj.uploaded };
+  }
+
+  // 补 title / platforms / cover / status
   for (const date of Object.keys(root)) {
     for (const slot of Object.keys(root[date])) {
       for (const slug of Object.keys(root[date][slot])) {
         const entry = root[date][slot][slug];
-        const status = await env.INBOX.get(`${PREFIX}/${date}/${slot}/${slug}/status.json`);
-        if (status) {
-          try {
-            entry.status = JSON.parse(await status.text());
-          } catch (e) {
-            entry.status = { downloaded: false };
-          }
-        }
-        // 从 platforms.json 读 title + platforms（三平台标题/标签）
+        const base = `${entry.kind === "article" ? ARTICLE_PREFIX : PREFIX}/${date}/${slot}/${slug}`;
         entry.title = "";
         entry.platforms = null;
+        entry.coverPath = null;
+
+        // 本地下载状态（status.json 由 feedback 写入）
         try {
-          const pj = await env.INBOX.get(`${PREFIX}/${date}/${slot}/${slug}/platforms.json`);
-          if (pj) {
-            const parsed = JSON.parse(await pj.text());
-            entry.title = (parsed && parsed.title) || "";
-            entry.platforms = (parsed && parsed.platforms) || null;
+          const st = await env.INBOX.get(`${base}/status.json`);
+          if (st) entry.status = JSON.parse(await st.text());
+        } catch (e) { /* ignore */ }
+
+        if (entry.kind === "article") {
+          // 各平台 article.json → {平台: {title, tags}}；封面取首个平台的 cover.*
+          const dirs = [...new Set(Object.keys(entry.files).map((r) => r.split("/")[0]))];
+          const platforms = {};
+          for (const dir of dirs) {
+            const jrel = entry.files[`${dir}/article.json`]
+              ? `${dir}/article.json`
+              : Object.keys(entry.files).find((r) => r.startsWith(dir + "/") && r.endsWith(".json"));
+            if (jrel) {
+              try {
+                const j = JSON.parse(await (await env.INBOX.get(`${base}/${jrel}`)).text());
+                platforms[dir] = {
+                  title: j.title || "",
+                  tags: normalizeTags(j.tags != null ? j.tags : j.keywords),
+                  body: String(j.body != null ? j.body : (j.content != null ? j.content : (j.markdown != null ? j.markdown : ""))),
+                };
+              } catch (e) { /* ignore */ }
+            }
+            if (!entry.coverPath) {
+              const c = Object.keys(entry.files).find(
+                (r) => r.startsWith(dir + "/") && /\.(png|jpe?g|webp|gif)$/i.test(r) && !/inline/i.test(r));
+              if (c) entry.coverPath = c;
+            }
           }
-        } catch (e) {
-          entry.title = "";
+          entry.platforms = Object.keys(platforms).length ? platforms : null;
+          try {
+            const mj = await env.INBOX.get(`${base}/meta.json`);
+            if (mj) entry.title = (JSON.parse(await mj.text()).title) || "";
+          } catch (e) { /* ignore */ }
+        } else {
+          // 视频线：platforms.json → title + 三平台标题/标签
+          try {
+            const pj = await env.INBOX.get(`${base}/platforms.json`);
+            if (pj) {
+              const parsed = JSON.parse(await pj.text());
+              entry.title = (parsed && parsed.title) || "";
+              entry.platforms = (parsed && parsed.platforms) || null;
+            }
+          } catch (e) { entry.title = ""; }
         }
       }
     }
@@ -257,18 +408,15 @@ export default {
       });
     }
 
-    // 文件下载：/media/<date>/<slot>/<slug>/<file>
+    // 文件下载：/media/<完整对象键>（inbox/... 或 articles/...）
     if (path.startsWith("/media/")) {
-      const rest = decodeURIComponent(path.slice("/media/".length));
-      const key = `${PREFIX}/${rest}`;
+      const key = decodeURIComponent(path.slice("/media/".length));
       const obj = await env.INBOX.get(key);
       if (!obj) return json({ ok: false, error: "文件不存在: " + key }, 404);
-      const isJson = key.endsWith(".json");
-      const contentType = isJson ? "application/json" : (key.endsWith(".mp4") ? "video/mp4" : "image/png");
       const fname = key.split("/").pop();
       return new Response(obj.body, {
         headers: {
-          "content-type": contentType,
+          "content-type": contentTypeFor(key),
           "content-disposition": `attachment; filename="${fname}"`,
           "content-length": String(obj.size || ""),
         },

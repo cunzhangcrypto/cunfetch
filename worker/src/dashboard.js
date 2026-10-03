@@ -6,9 +6,11 @@
  *     "<yyyymmdd>": {
  *       "<early|mid|late>": {
  *         "<slug>": {
- *           files: { "<filename>": { size, etag } },
- *           title: string,          // platforms.json.title
- *           platforms: {...}|null,  // platforms.json.platforms
+ *           kind: "video" | "article",  // 缺省 video
+ *           files: { "<相对路径>": { size, etag } },
+ *           title: string,
+ *           platforms: {...}|null,      // 视频=platforms.json.platforms；图文=各平台 article.json 的 title/tags
+ *           coverPath: string|null,     // 图文封面相对路径（视频用 files 里的 cover.*）
  *           status: { downloaded, pull_at, local_size } | null
  *         }
  *       }
@@ -38,7 +40,12 @@ export const FAVICON_SVG = `<svg width="128" height="128" viewBox="0 0 128 128" 
 
 export function renderDashboard(root, baseUrl) {
   const SLOT_LABEL = { early: "早 09:05", mid: "中 12:10", late: "晚 19:08" };
-  const PLATFORM_LABEL = { douyin: "抖音", bilibili: "B站", shipinhao: "视频号" };
+  const PLATFORM_LABEL = {
+    douyin: "抖音", bilibili: "B站", shipinhao: "视频号",
+    wechat: "公众号", xiaohongshu: "小红书", toutiao: "头条", baijiahao: "百家号", zhihu: "知乎",
+  };
+  const VIDEO_PLATFORMS = ["douyin", "bilibili", "shipinhao"];
+  const ARTICLE_PLATFORMS = ["wechat", "xiaohongshu", "toutiao", "baijiahao", "zhihu"];
   const rows = [];
   const dates = Object.keys(root || {}).sort().reverse();
   for (const date of dates) {
@@ -46,6 +53,7 @@ export function renderDashboard(root, baseUrl) {
       if (!root[date][slot]) continue;
       for (const slug of Object.keys(root[date][slot])) {
         const entry = root[date][slot][slug];
+        const kind = entry.kind === "article" ? "article" : "video";
         const fnames = Object.keys(entry.files || {});
         const hasVideo = fnames.includes("video.mp4");
         const hasPlatforms = fnames.includes("platforms.json");
@@ -53,7 +61,8 @@ export function renderDashboard(root, baseUrl) {
         const st = entry.status || {};
         const title = (entry.title || "").trim() || slug;
         rows.push({
-          date, slot, slug, coverName, hasVideo, hasPlatforms,
+          date, slot, slug, kind, coverName, coverPath: entry.coverPath || null,
+          hasVideo, hasPlatforms,
           platforms: entry.platforms || null,
           downloaded: Boolean(st.downloaded), pull_at: st.pull_at || null,
         });
@@ -62,35 +71,41 @@ export function renderDashboard(root, baseUrl) {
   }
 
   const cards = rows.map((r) => {
-    const media = (f) => `${baseUrl}/media/${r.date}/${r.slot}/${r.slug}/${f}`;
-    const coverUrl = r.coverName ? media(r.coverName) : "";
+    const kindPrefix = r.kind === "article" ? "articles" : "inbox";
+    const media = (f) => `${baseUrl}/media/${kindPrefix}/${r.date}/${r.slot}/${r.slug}/${f}`;
+    const coverRel = r.kind === "article" ? r.coverPath : r.coverName;
+    const coverUrl = coverRel ? media(coverRel) : "";
     const videoUrl = r.hasVideo ? media("video.mp4") : "";
     const dl = r.downloaded ? '<span class="chip ok">已下载 ✓</span>' : '<span class="chip no">未下载</span>';
+    const kindChip = r.kind === "article" ? '<span class="kindc">图文</span>' : '<span class="kindc">视频</span>';
     const cover = coverUrl
       ? `<a class="cover" href="${coverUrl}" download title="点击下载封面"><img src="${coverUrl}" alt="封面" loading="lazy"></a>`
       : '<div class="cover empty-cover"></div>';
 
     let platformsHtml = "";
-    for (const pname of ["douyin", "bilibili", "shipinhao"]) {
+    const names = r.kind === "article" ? ARTICLE_PLATFORMS : VIDEO_PLATFORMS;
+    for (const pname of names) {
       const p = (r.platforms && r.platforms[pname]) || null;
       if (!p) continue;
       const tags = Array.isArray(p.tags) ? p.tags : [];
       const allTags = tags.join("、");
+      const bodyText = (p.body || "").replace(/\s+/g, " ").trim();
       platformsHtml += `
         <div class="pf">
           <span class="pf-name">${PLATFORM_LABEL[pname] || pname}</span>
           <button class="title" data-copy="${escHtml(p.title || "")}">${escHtml(p.title || "")}</button>
           <div class="tagrow">
             ${tags.map((t) => `<span class="tag">${escHtml(t)}</span>`).join("")}
-            <button class="copy-tags" data-copy="${escHtml(allTags)}" title="一键复制全部标签">⧉ 复制</button>
+            ${tags.length ? `<button class="copy-tags" data-copy="${escHtml(allTags)}" title="一键复制全部标签">⧉ 复制</button>` : ""}
           </div>
+          ${bodyText ? `<div class="copyline" data-copy="${escHtml(p.body || "")}" title="点击复制正文"><span class="cl-label">正文</span><span class="cl-text">${escHtml(bodyText)}</span><span class="cl-copy">⧉ 复制</span></div>` : ""}
         </div>`;
     }
     if (!platformsHtml) platformsHtml = '<div class="pf muted">（无平台标题/标签）</div>';
 
     const actions = [];
     if (r.hasVideo) actions.push(`<a class="act" href="${videoUrl}" download="video.mp4">⬇ 下载视频</a>`);
-    if (r.coverName) actions.push(`<a class="act" href="${coverUrl}" download>⬇ 下载封面</a>`);
+    if (coverRel) actions.push(`<a class="act" href="${coverUrl}" download>⬇ 下载封面</a>`);
 
     return `
       <div class="item">
@@ -99,6 +114,7 @@ export function renderDashboard(root, baseUrl) {
           <div class="meta">
             <span class="date">${r.date}</span>
             <span class="slotchip">${SLOT_LABEL[r.slot] || r.slot}</span>
+            ${kindChip}
             <span class="slug">${escHtml(r.slug)}</span>
             ${dl}
             <span class="pull">${r.pull_at ? ("下载于 " + r.pull_at.replace("T", " ").slice(0, 19)) : "-"}</span>
@@ -139,6 +155,7 @@ export function renderDashboard(root, baseUrl) {
   .chip { padding:2px 8px; border-radius:999px; }
   .chip.ok { color:var(--ok); background:#e9f9ee; }
   .chip.no { color:var(--no); background:#fdecec; }
+  .kindc { background:#eef2ff; color:#4338ca; padding:2px 8px; border-radius:999px; font-weight:600; }
   .slug { opacity:.8; }
   .pull { margin-left:auto; }
   .title-lg { font-size:15px; font-weight:700; margin-bottom:8px; }
@@ -151,6 +168,11 @@ export function renderDashboard(root, baseUrl) {
   .tag { font-size:12px; background:#fff; border:1px solid var(--border); color:#444; border-radius:999px; padding:2px 10px; }
   .copy-tags { font-size:12px; background:var(--soft); color:var(--accent); border:none; border-radius:999px; padding:3px 10px; cursor:pointer; }
   .copy-tags:hover { background:#e5d8fb; }
+  .copyline { margin-top:6px; display:flex; gap:8px; align-items:center; cursor:pointer; font-size:12px; color:#555; background:#fff; border:1px dashed var(--border); border-radius:8px; padding:4px 8px; }
+  .copyline:hover { border-color:var(--accent); color:var(--accent); }
+  .cl-label { flex:0 0 auto; color:var(--accent); font-weight:600; }
+  .cl-text { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cl-copy { flex:0 0 auto; font-size:11px; opacity:.7; }
   .muted { color:var(--muted); font-style:italic; }
   .actions { display:flex; gap:10px; margin-top:12px; }
   .act { font-size:13px; color:var(--accent); text-decoration:none; border:1px solid var(--accent); border-radius:8px; padding:6px 12px; }
@@ -194,7 +216,7 @@ export function renderDashboard(root, baseUrl) {
     try{document.execCommand('copy'); show('已复制：' + text);}catch(e){ show('复制失败'); }
     document.body.removeChild(ta);
   }
-  document.querySelectorAll('button[data-copy]').forEach(b=>{
+  document.querySelectorAll('[data-copy]').forEach(b=>{
     b.addEventListener('click',()=>copy(b.getAttribute('data-copy')));
   });
 </script>
