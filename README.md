@@ -69,7 +69,7 @@ zip 内按平台分子目录（文件夹中英文名都认），标题取自 zip
 
 | 微信 | 支付宝 |
 | --- | --- |
-| ![微信打赏](assets/donate/wechat.png) | ![支付宝打赏](assets/donate/alipay.png) |
+| <img src="assets/donate/wechat.png" width="160" alt="微信收款码" /> | <img src="assets/donate/alipay.png" width="160" alt="支付宝收款码" /> | 
 
 ## 协议
 
