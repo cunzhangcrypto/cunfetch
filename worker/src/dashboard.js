@@ -64,6 +64,7 @@ export function renderDashboard(root, baseUrl) {
           date, slot, slug, kind, coverName, coverPath: entry.coverPath || null,
           hasVideo, hasPlatforms,
           platforms: entry.platforms || null,
+          comment: (entry.comment || "").trim(),
           downloaded: Boolean(st.downloaded), pull_at: st.pull_at || null,
         });
       }
@@ -106,6 +107,7 @@ export function renderDashboard(root, baseUrl) {
     const actions = [];
     if (r.hasVideo) actions.push(`<a class="act" href="${videoUrl}" download="video.mp4">⬇ 下载视频</a>`);
     if (coverRel) actions.push(`<a class="act" href="${coverUrl}" download>⬇ 下载封面</a>`);
+    if (r.comment) actions.push(`<button class="act copy-comment" data-copy="${escHtml(r.comment)}" title="点击复制评论">💬 评论</button>`);
 
     return `
       <div class="item">
@@ -177,6 +179,7 @@ export function renderDashboard(root, baseUrl) {
   .actions { display:flex; gap:10px; margin-top:12px; }
   .act { font-size:13px; color:var(--accent); text-decoration:none; border:1px solid var(--accent); border-radius:8px; padding:6px 12px; }
   .act:hover { background:var(--soft); }
+  button.act { background:none; cursor:pointer; font-family:inherit; }
   .empty { text-align:center; color:var(--muted); padding:40px 0; }
   .foot { margin-top:20px; color:var(--muted); font-size:12px; text-align:center; }
   #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#222; color:#fff; padding:8px 16px; border-radius:8px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:9; }

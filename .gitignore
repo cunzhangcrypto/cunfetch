@@ -23,6 +23,7 @@ credentials/
 run_daily.cmd
 pull_inbox.cmd
 run_video.cmd
+download.bat
 
 # 本地工具目录（拉取等本地专用逻辑，不入 GitHub 仓库）
 tools/

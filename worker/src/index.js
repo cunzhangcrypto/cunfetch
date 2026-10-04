@@ -339,6 +339,7 @@ async function collectBucket(env) {
         entry.title = "";
         entry.platforms = null;
         entry.coverPath = null;
+        entry.comment = "";
 
         // 本地下载状态（status.json 由 feedback 写入）
         try {
@@ -383,6 +384,7 @@ async function collectBucket(env) {
               const parsed = JSON.parse(await pj.text());
               entry.title = (parsed && parsed.title) || "";
               entry.platforms = (parsed && parsed.platforms) || null;
+              entry.comment = (parsed && parsed.comment) || "";
             }
           } catch (e) { entry.title = ""; }
         }
