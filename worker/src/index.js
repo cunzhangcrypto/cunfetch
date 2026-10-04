@@ -301,6 +301,20 @@ function normalizeTags(t) {
   return [];
 }
 
+// 取评论：优先 platforms.shipinhao.comment，其次任一平台的 comment，最后顶层 comment
+function pickComment(parsed, plats) {
+  const fromPlat = (p) => (p && typeof p.comment === "string" ? p.comment.trim() : "");
+  if (plats) {
+    const sh = fromPlat(plats.shipinhao);
+    if (sh) return sh;
+    for (const k of Object.keys(plats)) {
+      const c = fromPlat(plats[k]);
+      if (c) return c;
+    }
+  }
+  return parsed && typeof parsed.comment === "string" ? parsed.comment.trim() : "";
+}
+
 async function collectBucket(env) {
   // 汇总两条线：inbox/（视频）与 articles/（自媒体图文），统一到 root[date][slot][slug]
   const root = {};
@@ -383,8 +397,10 @@ async function collectBucket(env) {
             if (pj) {
               const parsed = JSON.parse(await pj.text());
               entry.title = (parsed && parsed.title) || "";
-              entry.platforms = (parsed && parsed.platforms) || null;
-              entry.comment = (parsed && parsed.comment) || "";
+              const plats = (parsed && parsed.platforms) || null;
+              entry.platforms = plats;
+              // 评论：muse 通常挂在 platforms.shipinhao.comment，兜底扫各平台，再兜底顶层 comment
+              entry.comment = pickComment(parsed, plats);
             }
           } catch (e) { entry.title = ""; }
         }
