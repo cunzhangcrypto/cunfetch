@@ -5,3 +5,7 @@ compatibility_date = "2024-11-01"
 [[r2_buckets]]
 binding = "INBOX"
 bucket_name = "cunfetch-inbox"
+
+# 定时清理：每天 20:00 UTC（北京时间次日 04:00）删除超过保留期的素材
+[triggers]
+crons = ["0 20 * * *"]

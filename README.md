@@ -59,6 +59,15 @@ zip 内按平台分子目录（文件夹中英文名都认），标题取自 zip
 - 某个平台**不需要发** → 该子目录直接不建，其余照常。
 - 本地落盘：`D:\CunContent\自媒体\<YYYY-MM-DD>_<标题>\`，结构与上面一致。
 
+## 自动清理（保留 7 天）
+
+R2 只是中转站：素材上传后**保留 7 天**，过期由 Worker 每天自动清理，不长期占用存储。
+
+- **保留期**：7 天，以对象上传时间为准
+- **清理范围**：视频线 `inbox/` + 图文线 `articles/`（含封面、platforms.json、状态文件）
+- **触发方式**：Worker Cron 定时任务，每天北京时间 04:00 执行一次
+- **手动核验**：`POST /api/cleanup`，加 `?dry=1` 可只统计不删除
+
 ## 部署
 
 参见 [`worker/README.md`](worker/README.md)：手动在 GitHub Actions `Deploy Inbox Worker` 触发，Cloudflare 无需本机操作。

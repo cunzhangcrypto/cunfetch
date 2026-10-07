@@ -6,7 +6,10 @@
  * - POST /api/feedback   本地下载完成后上报状态
  * - GET  /api/objects    汇总各 slug 对象与下载状态
  * - GET  /api/health     免鉴权连通性探测
+ * - POST /api/cleanup    手动清理超期素材（?dry=1 只统计）
  * - GET  /              看板 HTML（明亮主题单页）
+ *
+ * 定时任务（wrangler.toml [triggers]）：每日清理超过 7 天的素材，省存储
  *
  * 鉴权：Authorization: Bearer <WORKER_API_TOKEN>（env secret）
  * R2 binding：INBOX（wrangler.toml [[r2_buckets]]）
@@ -22,6 +25,7 @@
 const SLOTS = new Set(["early", "mid", "late"]);
 const PREFIX = "inbox";
 const ARTICLE_PREFIX = "articles"; // 自媒体图文（worker 端解压后按 平台/文件 存）
+const RETENTION_DAYS = 7; // R2 素材保留天数，超过即清理（省存储）
 // 图文各平台子目录名（中英文都认），用于剥离 zip 外层包裹目录
 const PLATFORM_DIRS = new Set([
   "wechat", "微信公众号", "微信",
@@ -315,6 +319,34 @@ function pickComment(parsed, plats) {
   return parsed && typeof parsed.comment === "string" ? parsed.comment.trim() : "";
 }
 
+/**
+ * 清理超过 RETENTION_DAYS 天的素材（inbox/ 与 articles/ 两条线）。
+ * 以对象上传时间为准；dry=true 时只统计不删除。
+ */
+async function cleanupOldObjects(env, dry = false) {
+  const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  let scanned = 0;
+  const expiredKeys = [];
+  for (const prefix of [PREFIX + "/", ARTICLE_PREFIX + "/"]) {
+    let cursor;
+    do {
+      const res = cursor
+        ? await env.INBOX.list({ prefix, cursor })
+        : await env.INBOX.list({ prefix });
+      scanned += res.objects.length;
+      const expired = res.objects
+        .filter((o) => new Date(o.uploaded).getTime() < cutoff)
+        .map((o) => o.key);
+      if (expired.length) {
+        expiredKeys.push(...expired);
+        if (!dry) await env.INBOX.delete(expired); // R2 批量删除，单次上限 1000
+      }
+      cursor = res.truncated ? res.cursor : undefined;
+    } while (cursor);
+  }
+  return { scanned, deleted: expiredKeys.length, keys: expiredKeys.slice(0, 50) };
+}
+
 async function collectBucket(env) {
   // 汇总两条线：inbox/（视频）与 articles/（自媒体图文），统一到 root[date][slot][slug]
   const root = {};
@@ -462,6 +494,22 @@ export default {
       return handleFeedback(request, env);
     }
 
+    // 手动触发清理（?dry=1 只统计不删除），便于上线后核验
+    if (path === "/api/cleanup" && request.method === "POST") {
+      if (!authorized(request, env)) return json({ ok: false, error: "未授权" }, 401);
+      const dry = url.searchParams.get("dry") === "1";
+      const result = await cleanupOldObjects(env, dry);
+      return json({ ok: true, dry, retention_days: RETENTION_DAYS, ...result });
+    }
+
     return json({ ok: false, error: "未找到路由: " + path }, 404);
+  },
+
+  // 定时触发器（wrangler.toml [triggers]）：清理超过保留期的素材
+  async scheduled(event, env, ctx) {
+    const result = await cleanupOldObjects(env);
+    console.log(
+      `R2 清理完成：扫描 ${result.scanned} 个对象，删除 ${result.deleted} 个超过 ${RETENTION_DAYS} 天的素材`,
+    );
   },
 };

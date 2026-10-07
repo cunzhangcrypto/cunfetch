@@ -18,9 +18,30 @@ worker/
 | `/api/upload` | POST | Bearer | multipart 上传：`file` + `slug`(视频必填) + `slot(early\|mid\|late)` + `date?(YYYYMMDD)` + `type?(video\|article)` |
 | `/api/feedback` | POST | Bearer | JSON：`slug/slot/date/downloaded/pull_at/local_size`，上报本地下载状态 |
 | `/api/objects` | GET | Bearer | 返回各 slug 对象与状态（JSON） |
+| `/api/cleanup` | POST | Bearer | 清理超过 7 天的素材；加 `?dry=1` 只统计不删除 |
 | `/` | GET | 无 | 看板页面（公开可访问，未授权也能看） |
 
 **鉴权**：请求头 `Authorization: Bearer <WORKER_API_TOKEN>`。
+
+## 定时清理（保留 7 天）
+
+R2 只做临时中转，`wrangler.toml` 里配了 Cron 触发器：
+
+```toml
+[triggers]
+crons = ["0 20 * * *"]   # UTC 20:00 = 北京时间 04:00，每天一次
+```
+
+每天触发一次 Worker 的 `scheduled()`，删除**上传时间超过 7 天**的对象，`inbox/`（视频）与 `articles/`（图文）两条线全覆盖。
+
+想立即核验效果，可手动调接口：
+
+```bash
+curl -X POST "{worker_url}/api/cleanup?dry=1" -H "Authorization: Bearer {WORKER_API_TOKEN}"  # 只统计，返回将被删除的 key
+curl -X POST "{worker_url}/api/cleanup" -H "Authorization: Bearer {WORKER_API_TOKEN}"         # 真删
+```
+
+> 调整保留天数改 `src/index.js` 顶部的 `RETENTION_DAYS`；定时表达式改 `wrangler.toml` 的 `crons`，改完重新部署生效。
 
 ## 部署（在你有 Cloudflare 账号的机器上执行）
 
