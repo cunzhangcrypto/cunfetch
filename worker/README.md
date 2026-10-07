@@ -6,8 +6,11 @@
 
 ```
 worker/
-├── wrangler.toml      # Worker 配置 + R2 binding (INBOX)
-└── src/index.js       # 端点逻辑 + 看板 HTML
+├── wrangler.toml      # Worker 配置 + R2 binding (INBOX) + Cron 定时清理
+└── src/
+    ├── index.js       # 端点逻辑 + R2 读写
+    ├── dashboard.js   # 看板 + 中视频文稿页 UI（唯一 UI 真源）
+    └── videodoc.js    # 中视频文稿 md 解析（格式 v1）
 ```
 
 ## 端点
@@ -15,11 +18,12 @@ worker/
 | 端点 | 方法 | 鉴权 | 说明 |
 |---|---|---|---|
 | `/api/health` | GET | 无 | 连通性探测 |
-| `/api/upload` | POST | Bearer | multipart 上传：`file` + `slug`(视频必填) + `slot(early\|mid\|late)` + `date?(YYYYMMDD)` + `type?(video\|article)` |
-| `/api/feedback` | POST | Bearer | JSON：`slug/slot/date/downloaded/pull_at/local_size`，上报本地下载状态 |
+| `/api/upload` | POST | Bearer | multipart 上传：`file` + `slug`(视频必填) + `slot(early\|mid\|late)` + `date?(YYYYMMDD)` + `type?(video\|article\|doc)`；直接传 `.md` 会自动走文稿线 |
+| `/api/feedback` | POST | Bearer | JSON：`slug/slot/date/kind/downloaded/pull_at/local_size`，上报本地下载状态 |
 | `/api/objects` | GET | Bearer | 返回各 slug 对象与状态（JSON） |
 | `/api/cleanup` | POST | Bearer | 清理超过 7 天的素材；加 `?dry=1` 只统计不删除 |
 | `/` | GET | 无 | 看板页面（公开可访问，未授权也能看） |
+| `/video-doc` | GET | 无 | 中视频文稿页：各平台标题/简介/标签/封面文案，逐项可点击复制 |
 
 **鉴权**：请求头 `Authorization: Bearer <WORKER_API_TOKEN>`。
 
@@ -32,7 +36,7 @@ R2 只做临时中转，`wrangler.toml` 里配了 Cron 触发器：
 crons = ["0 20 * * *"]   # UTC 20:00 = 北京时间 04:00，每天一次
 ```
 
-每天触发一次 Worker 的 `scheduled()`，删除**上传时间超过 7 天**的对象，`inbox/`（视频）与 `articles/`（图文）两条线全覆盖。
+每天触发一次 Worker 的 `scheduled()`，删除**上传时间超过 7 天**的对象，`inbox/`（视频）、`articles/`（图文）、`docs/`（中视频文稿）三条线全覆盖。
 
 想立即核验效果，可手动调接口：
 
@@ -89,7 +93,7 @@ python -m src.main --pull-r2          # auto：按当前时刻判定档位
 
 ## 看板
 
-直接浏览器打开 Worker 的公开 URL（`/`）即可查看实时看板。
+直接浏览器打开 Worker 的公开 URL（`/`）即可查看实时看板；中视频文稿在 `/video-doc`（看板右上角也有入口）。
 
 ---
 
@@ -147,6 +151,45 @@ Content-Type: multipart/form-data
   ```
 - worker 上传时**解压并按 `<平台>/<文件>` 存入收件箱**，看板上可直接看到 5 个平台的标题/标签与封面。
 - 本地在**晚间档（late）定时任务**里拉取并镜像到 `D:\CunContent\自媒体\<日期>_<标题>\`，供 CunWrite 扫描直发。图文与视频两条线互不影响。
+
+### 中视频文稿上传（`名称.md`，无需其他字段）
+
+中视频（YouTube / B站 / 视频号）的标题、简介、标签、封面文案等，写成一个 `名称.md` 直接上传即可，worker 会自动解析并在 `/video-doc` 展示：
+
+```
+POST {worker_url}/api/upload
+Authorization: Bearer {WORKER_API_TOKEN}
+Content-Type: multipart/form-data
+
+字段：
+  file    名称.md            # 必带，如 20261007muse-video-pk-flow.md
+  type    (可选) doc         # 传 .md 会自动识别为文稿；也可显式写 doc
+  date    (可选) YYYYMMDD     # 缺省读文稿 meta 段的 date，再缺省用服务器当天(Asia/Shanghai)
+  slug    (可选)             # 缺省读文稿 meta 段的 slug
+```
+
+文稿格式 v1（首部注释已声明，**顺序与字段名不要增删改**）：
+
+```
+# <标题>
+## meta        - slug / date / srt / duration / blog_alias
+## youtube     ### title_1（推荐） / title_2 / title_3 / description / chapters / tags
+## bilibili    ### title_1（推荐） / title_2 / title_3 / description
+## shipinhao   ### long_desc / short_titles（1. 2. 3. 编号列表）/ comment
+## cover       ### main / sub
+```
+
+- 多行内容用三个反引号包成代码块（围栏本身不入值）；单行字段直接写值。
+- 不再包含博客内容（不写 `## blog` 段）；旧文稿若带 blog 段仍会照常展示。
+- youtube 的 `chapters` / `tags` 与 `description` 内容重复，页面不再单独展示（文稿里保留无妨）。
+- worker 存 `docs/<yyyymmdd>/<slug>/<原名>.md`（原文可回溯）+ `doc.json`（解析结果，页面直接读它）。
+- 页面上**每一项都能单独点击复制**：标题、简介、封面文案……视频号的短标题会拆成一条条分别复制。
+
+```bash
+curl -X POST "{worker_url}/api/upload" \
+  -H "Authorization: Bearer {WORKER_API_TOKEN}" \
+  -F "file=@20261007muse-video-pk-flow.md;type=text/markdown"
+```
 
 ### platforms.json 结构（与看板/下载一致）
 

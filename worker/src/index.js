@@ -2,12 +2,13 @@
  * CunFetch Inbox — Cloudflare Worker
  *
  * 云端收件箱 API + R2 存储 + 看板页面。
- * - POST /api/upload     muse 上传视频 / platforms.json
+ * - POST /api/upload     muse 上传视频 / platforms.json / 中视频文稿(md)
  * - POST /api/feedback   本地下载完成后上报状态
  * - GET  /api/objects    汇总各 slug 对象与下载状态
  * - GET  /api/health     免鉴权连通性探测
  * - POST /api/cleanup    手动清理超期素材（?dry=1 只统计）
  * - GET  /              看板 HTML（明亮主题单页）
+ * - GET  /video-doc     中视频文稿页（各平台标题/简介/标签，逐项可复制）
  *
  * 定时任务（wrangler.toml [triggers]）：每日清理超过 7 天的素材，省存储
  *
@@ -19,12 +20,14 @@
  *   inbox/<yyyymmdd>/<slot>/<slug>/platforms.json
  *   inbox/<yyyymmdd>/<slot>/<slug>/status.json           ← 本地上报后由本 Worker 写入
  *   articles/<yyyymmdd>/<slot>/<slug>/<平台>/article.json | cover.<ext> ...  ← 自媒体图文
+ *   docs/<yyyymmdd>/<slug>/<原名>.md + doc.json                              ← 中视频文稿
  * slot ∈ early | mid | late
  */
 
 const SLOTS = new Set(["early", "mid", "late"]);
 const PREFIX = "inbox";
 const ARTICLE_PREFIX = "articles"; // 自媒体图文（worker 端解压后按 平台/文件 存）
+const DOC_PREFIX = "docs"; // 中视频文稿（muse 上传的「名称.md」，解析后存 doc.json）
 const RETENTION_DAYS = 7; // R2 素材保留天数，超过即清理（省存储）
 // 图文各平台子目录名（中英文都认），用于剥离 zip 外层包裹目录
 const PLATFORM_DIRS = new Set([
@@ -39,7 +42,8 @@ const PLATFORM_DIRS = new Set([
 const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 
 import JSZip from "jszip";
-import { renderDashboard, FAVICON_SVG } from "./dashboard.js";
+import { renderDashboard, renderVideoDoc, FAVICON_SVG } from "./dashboard.js";
+import { parseVideoDoc } from "./videodoc.js";
 
 function classifyFile(name, type, bytes, outParts) {
   // json → platforms.json；图片 → cover.<ext>；zip 由调用方先行解压；其余 → video.mp4
@@ -113,6 +117,7 @@ function contentTypeFor(name) {
   if (n.endsWith(".webp")) return "image/webp";
   if (n.endsWith(".gif")) return "image/gif";
   if (n.endsWith(".mp4")) return "video/mp4";
+  if (n.endsWith(".md")) return "text/markdown; charset=utf-8";
   if (n.endsWith(".zip")) return "application/zip";
   return "application/octet-stream";
 }
@@ -136,13 +141,32 @@ async function readUploadMultipart(request) {
   // 用 FormData 解析 multipart。通用字段：slot / date / type(默认 video)。
   //   video   ：可一次带多个 file（platforms.json + 封面 + video.mp4），另需 slug
   //   article ：带一个图文 zip（内含各平台子目录），标题取自 zip 文件名，slug 可省（由标题派生）
+  //   doc     ：传一个「名称.md」（中视频文稿），date/slug 优先读文稿 meta，无需 slot
   const form = await request.formData();
   const files = form.getAll("file");
   if (!files || files.length === 0) throw new Error("缺少 file 字段（至少一个）");
+  const type = String(form.get("type") || "video").toLowerCase();
+  const dateRaw = form.get("date");
+
+  // 中视频文稿：type=doc，或直接传了 .md（muse 只需上传「名称.md」即可，无需其他字段）
+  const mdFile = files.find((f) => f instanceof File && /\.md$/i.test(f.name || ""));
+  if (type === "doc" || mdFile) {
+    const f = mdFile || files.find((x) => x instanceof File);
+    if (!f) throw new Error("文稿上传需提供 .md 文件");
+    const filename = f.name || "doc.md";
+    const mdText = await f.text();
+    const doc = parseVideoDoc(mdText);
+    const slug = sanitizeSlug(form.get("slug") || doc.slug || doc.title || filename.replace(/\.[^.]+$/, ""));
+    if (!slug) throw new Error("slug 清洗后为空");
+    return {
+      type: "doc", slug, filename, mdText, doc,
+      date: doc.dateYmd || parseDate(dateRaw), // 优先用文稿 meta 里的 date
+    };
+  }
+
   const slotRaw = form.get("slot");
   if (!SLOTS.has(slotRaw)) throw new Error("slot 必须为 early|mid|late");
-  const date = parseDate(form.get("date"));
-  const type = String(form.get("type") || "video").toLowerCase();
+  const date = parseDate(dateRaw);
 
   if (type === "article") {
     const zipFile = files.find((f) => f instanceof File && /\.zip$/i.test(f.name || ""))
@@ -198,6 +222,26 @@ async function handleUpload(request, env) {
     parsed = await readUploadMultipart(request);
   } catch (e) {
     return json({ ok: false, error: e.message }, 400);
+  }
+
+  if (parsed.type === "doc") {
+    // 中视频文稿：存原始 md（可回溯）+ 解析后的 doc.json（/video-doc 直接读它渲染）
+    const { slug, date, filename, mdText, doc } = parsed;
+    const base = `${DOC_PREFIX}/${date}/${slug}`;
+    const safeName = filename.replace(/[\\/:*?"<>|]/g, "_");
+    await env.INBOX.put(`${base}/${safeName}`, mdText, {
+      httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+    });
+    const payload = { ...doc, original: safeName, uploaded_at: new Date().toISOString() };
+    await env.INBOX.put(`${base}/doc.json`, JSON.stringify(payload), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    return json({
+      ok: true, type: "doc", slug, date, title: doc.title,
+      sections: doc.sections.map((s) => s.name),
+      fields: doc.sections.reduce((n, s) => n + s.fields.length, 0),
+      file: `${base}/${safeName}`,
+    });
   }
 
   if (parsed.type === "article") {
@@ -320,14 +364,14 @@ function pickComment(parsed, plats) {
 }
 
 /**
- * 清理超过 RETENTION_DAYS 天的素材（inbox/ 与 articles/ 两条线）。
+ * 清理超过 RETENTION_DAYS 天的素材（inbox/ 、articles/ 、docs/ 三条线）。
  * 以对象上传时间为准；dry=true 时只统计不删除。
  */
 async function cleanupOldObjects(env, dry = false) {
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
   let scanned = 0;
   const expiredKeys = [];
-  for (const prefix of [PREFIX + "/", ARTICLE_PREFIX + "/"]) {
+  for (const prefix of [PREFIX + "/", ARTICLE_PREFIX + "/", DOC_PREFIX + "/"]) {
     let cursor;
     do {
       const res = cursor
@@ -442,6 +486,31 @@ async function collectBucket(env) {
   return root;
 }
 
+// 汇总中视频文稿：读 docs/<date>/<slug>/doc.json，按日期倒序
+async function collectDocs(env) {
+  const out = [];
+  const prefix = `${DOC_PREFIX}/`;
+  let cursor;
+  do {
+    const res = cursor
+      ? await env.INBOX.list({ prefix, cursor })
+      : await env.INBOX.list({ prefix });
+    for (const o of res.objects) {
+      if (!o.key.endsWith("/doc.json")) continue;
+      const obj = await env.INBOX.get(o.key);
+      if (!obj) continue;
+      try {
+        out.push(JSON.parse(await obj.text()));
+      } catch (e) {
+        // 坏数据跳过，不影响整页
+      }
+    }
+    cursor = res.truncated ? res.cursor : undefined;
+  } while (cursor);
+  out.sort((a, b) => String(b.dateYmd || "").localeCompare(String(a.dateYmd || "")));
+  return out;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -480,6 +549,14 @@ export default {
       const root = await collectBucket(env);
       if (path === "/api/objects") return json({ ok: true, items: root });
       return new Response(renderDashboard(root, origin), {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+
+    // 中视频文稿页（公开，与看板一致）
+    if (path === "/video-doc") {
+      const docs = await collectDocs(env);
+      return new Response(renderVideoDoc(docs), {
         headers: { "content-type": "text/html; charset=utf-8" },
       });
     }

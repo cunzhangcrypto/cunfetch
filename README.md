@@ -12,7 +12,8 @@ CunFetch/
 │   ├── wrangler.toml                # Worker 配置 + R2 bucket(binding: INBOX)
 │   └── src/
 │       ├── index.js                 # API 路由 + 下载 + 看板渲染
-│       └── dashboard.js             # 看板单页 UI（唯一 UI 真源）
+│       ├── dashboard.js             # 看板 + 中视频文稿页 UI（唯一 UI 真源）
+│       └── videodoc.js              # 中视频文稿 md 解析（格式 v1）
 └── .github/workflows/
     ├── deploy-inbox-worker.yml      # 手动部署 Worker（workflow_dispatch）
     └── check-blog.yml               # 博客检测（已暂停定时，仅手动触发）
@@ -59,12 +60,33 @@ zip 内按平台分子目录（文件夹中英文名都认），标题取自 zip
 - 某个平台**不需要发** → 该子目录直接不建，其余照常。
 - 本地落盘：`D:\CunContent\自媒体\<YYYY-MM-DD>_<标题>\`，结构与上面一致。
 
+## 中视频文稿（/video-doc）
+
+除了短视频，收件箱还支持**中视频文稿**：muse 把写好的 **`名称.md`** 直接上传（表单只需这一个文件，无需其他字段），worker 自动解析出各平台的标题、简介、标签、封面文案等，在 `{域名}/video-doc` 页面展示（看板右上角也有入口）。
+
+- **上传**：`POST /api/upload`，`file=名称.md`（传 `.md` 会自动识别走文稿线；日期 / slug 从文稿 meta 读取）。
+- **存储**：`docs/<yyyymmdd>/<slug>/<原名>.md`（原文可回溯）+ `doc.json`（解析结果，页面直接读它渲染）。
+- **页面**：各平台标题（含推荐位）/ 简介 / 视频号长文案与短标题、评论 / 封面主副文案，**每一项都能单独点击复制**（视频号短标题拆成一条条分别复制）。默认收起，点标题展开。
+
+文稿格式 v1（顺序与字段名不要增删改）：
+
+```text
+# <标题>
+## meta        - slug / date / srt / duration / blog_alias
+## youtube     ### title_1（推荐） / title_2 / title_3 / description / chapters / tags
+## bilibili    ### title_1（推荐） / title_2 / title_3 / description
+## shipinhao   ### long_desc / short_titles（1. 2. 3. 编号列表）/ comment
+## cover       ### main / sub
+```
+
+多行内容用三个反引号包成代码块（围栏本身不入值）；单行字段直接写值。不再包含博客内容（不写 `## blog` 段）；youtube 的 `chapters` / `tags` 与简介重复，页面不单独展示。
+
 ## 自动清理（保留 7 天）
 
 R2 只是中转站：素材上传后**保留 7 天**，过期由 Worker 每天自动清理，不长期占用存储。
 
 - **保留期**：7 天，以对象上传时间为准
-- **清理范围**：视频线 `inbox/` + 图文线 `articles/`（含封面、platforms.json、状态文件）
+- **清理范围**：视频线 `inbox/` + 图文线 `articles/` + 中视频文稿线 `docs/`（含封面、platforms.json、doc.json、状态文件）
 - **触发方式**：Worker Cron 定时任务，每天北京时间 04:00 执行一次
 - **手动核验**：`POST /api/cleanup`，加 `?dry=1` 可只统计不删除
 
