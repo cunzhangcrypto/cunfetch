@@ -1,14 +1,15 @@
 /**
- * 中视频文稿（muse 上传的「名称.md」）解析 —— 格式 v1
+ * 中视频文稿（muse 上传的「名称.md」）解析 —— 格式 v1 / v2
  *
  * 约定（由文稿首部注释声明，顺序与字段名固定）：
  *   # <标题>
  *   ## meta          → 用 "- key: value" 列表（slug / date / srt / duration / blog_alias）
  *   ## youtube       → ### title_1（推荐） / title_2 / title_3 / description / chapters / tags
- *   ## bilibili      → 同上（title_* / description）
+ *   ## bilibili      → ### title_1（推荐） / title_2 / title_3 / description
  *   ## shipinhao     → ### long_desc / short_titles（编号列表）/ comment
- *   ## blog          → ### title / alias
- *   ## cover         → ### main / sub
+ *   ## cover         → v1: ### main / sub；v2: ### cover_prompt（封面生成提示词模板）
+ *
+ *   v2 起不再含 ## blog 段（博客直发网站）；解析器仍兼容旧文稿的 ## blog。
  *
  * 多行内容用 ``` 代码块包裹（围栏本身不保留）；单行字段直接写值。
  *

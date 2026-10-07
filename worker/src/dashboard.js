@@ -271,6 +271,7 @@ const DOC_FIELD_LABEL = {
   description: "简介", chapters: "章节", tags: "标签",
   long_desc: "长文案", short_titles: "短标题", comment: "评论",
   title: "标题", alias: "别名", main: "主文案", sub: "副文案",
+  cover_prompt: "封面提示词",
 };
 
 const DOC_META_LABEL = {

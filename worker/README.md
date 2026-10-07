@@ -168,7 +168,7 @@ Content-Type: multipart/form-data
   slug    (可选)             # 缺省读文稿 meta 段的 slug
 ```
 
-文稿格式 v1（首部注释已声明，**顺序与字段名不要增删改**）：
+文稿格式 v2（首部注释已声明，**顺序与字段名不要增删改**）：
 
 ```
 # <标题>
@@ -176,14 +176,15 @@ Content-Type: multipart/form-data
 ## youtube     ### title_1（推荐） / title_2 / title_3 / description / chapters / tags
 ## bilibili    ### title_1（推荐） / title_2 / title_3 / description
 ## shipinhao   ### long_desc / short_titles（1. 2. 3. 编号列表）/ comment
-## cover       ### main / sub
+## cover       ### cover_prompt（封面生成提示词模板）
 ```
 
 - 多行内容用三个反引号包成代码块（围栏本身不入值）；单行字段直接写值。
-- 不再包含博客内容（不写 `## blog` 段）；旧文稿若带 blog 段仍会照常展示。
+- 不含博客内容（博客直发网站，不写 `## blog` 段）；旧文稿若带 blog 段仍会照常展示。
 - youtube 的 `chapters` / `tags` 与 `description` 内容重复，页面不再单独展示（文稿里保留无妨）。
+- `cover_prompt` 在页面上作为**一项整体展示、一键复制全文**（v1 的 `main` / `sub` 仍兼容展示）。
 - worker 存 `docs/<yyyymmdd>/<slug>/<原名>.md`（原文可回溯）+ `doc.json`（解析结果，页面直接读它）。
-- 页面上**每一项都能单独点击复制**：标题、简介、封面文案……视频号的短标题会拆成一条条分别复制。
+- 页面上**每一项都能单独点击复制**：标题、简介、封面提示词……视频号的短标题会拆成一条条分别复制。
 
 ```bash
 curl -X POST "{worker_url}/api/upload" \
